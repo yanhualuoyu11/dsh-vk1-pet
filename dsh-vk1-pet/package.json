@@ -1,0 +1,53 @@
+{
+  "name": "dsh-vk1-pet",
+  "version": "1.0.0",
+  "description": "DSH 余额桌宠：把 VK-1（大肥鱼桌宠）做成 DSH web 插件的悬浮桌宠，余额显示在角色手持的平板上。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "desktop-pet",
+    "balance",
+    "overlay"
+  ],
+  "type": "module",
+  "main": "host/index.js",
+  "exports": {
+    ".": "./host/index.js",
+    "./client": "./client/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "host",
+    "client",
+    "assets",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node client/build.mjs",
+    "test": "node --test --test-timeout=30000 \"test/*.test.mjs\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9",
+    "jsdom": "^29.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

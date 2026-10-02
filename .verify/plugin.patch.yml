@@ -1,0 +1,5 @@
+# Verification overlay: mount the plugin from this checkout by absolute path, so
+# no profile install is needed to exercise the real host and browser halves.
+- insert:
+    - id: dsh-vk1-pet
+      name: '/root/projs/ds_VK-1_plugin/dsh-vk1-pet/host/index.js'

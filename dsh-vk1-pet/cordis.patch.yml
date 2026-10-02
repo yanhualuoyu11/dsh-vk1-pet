@@ -1,0 +1,9 @@
+# dsh-vk1-pet bundle patch: one package, one floating pet.
+#
+# Inserting a single row is the whole composition: the host half mounts the
+# balance routes on the web server, and the same package's `dsh.client`
+# declaration puts the browser half in the boot graph, where it registers
+# itself into the `shell.overlay` seat.
+- insert:
+    - id: dsh-vk1-pet
+      name: dsh-vk1-pet
