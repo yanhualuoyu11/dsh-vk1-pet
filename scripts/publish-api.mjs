@@ -2,10 +2,9 @@
 /**
  * 用 GitHub REST API 把当前提交上传到一个仓库。
  *
- * 为什么需要它：这台机器到 github.com 的 git 通道（smart HTTP push）时通时断，
- * `git push` 会卡在 "Trying <ip>:443..." 上没有任何输出；但 api.github.com 一直正常。
- * 这个脚本把同一个提交拆成 blob / tree / commit / ref 四个 API 调用发出去，
- * 走的是 api.github.com，因此在这里能稳定成功。
+ * 为什么需要它：有些网络环境里 github.com 的 git 通道（smart HTTP push）不通，
+ * `git push` 会卡在 "Trying <ip>:443..." 上、没有任何输出，而 api.github.com 正常。
+ * 这个脚本把同一个提交拆成 blob / tree / commit / ref 四步发出去，走 api.github.com。
  *
  * 用法：
  *   GITHUB_TOKEN=ghp_xxx node scripts/publish-api.mjs

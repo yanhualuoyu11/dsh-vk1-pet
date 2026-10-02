@@ -1,32 +1,29 @@
 # 验证脚手架
 
-这里的脚本用来**在不碰你正在用的 `dsh web`** 的前提下，把插件真的跑起来验证一遍。
-关键在于 `DSH_HOME` 被指向工作区内的 `.verify/dsh-home`，所以 `~/.dsh` 从头到尾只被读取
-（读一次真实 API Key），没有被写入。
+这里的脚本用来**在不碰你真实 `~/.dsh`** 的前提下，把插件真的跑起来验证一遍：
+`DSH_HOME` 指向仓库内的 `.verify/dsh-home`。
 
-## 一次性准备
+两个刻意的约束：
 
-```sh
-cd /root/projs/ds_VK-1_plugin
+- 脚本**不读**继承来的 `DSH_HOME`——很多 shell 里它已经指向真实 home，用它会让脚手架
+  写到真实配置里去。要换目录请用 `VK1_DSH_HOME`。
+- 脚本**不猜** `dsh` 和 `node` 的位置，直接用 `PATH` 上的那个。所以先确认
+  `dsh --version` 在同一个 shell 里能跑通。
 
-# 渲染预览图需要 Pillow（装进工作区，不动系统 Python）
-pip install --target .verify/pylibs pillow
-# 预览里的中文标题需要一个 CJK 字体
-curl -sSL -o .verify/fonts/NotoSansSC-Bold.otf \
-  https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/SC/NotoSansSC-Bold.otf
-```
+插件每一行的路径都要求绝对路径，所以 `plugin.patch.yml` 由 `run.sh` 在运行时生成
+（已被 `.gitignore` 忽略），仓库里不留任何人的目录。
 
-`.verify/pylibs` 是用 python3.12 装的；渲染时请用 `python3.12`。
-
-## 1. 用 --patch 直接挂载 checkout（最快）
+## 1. 用 `--patch` 直接挂载 checkout（最快）
 
 ```sh
-.verify/run.sh            # http://127.0.0.1:3099
+.verify/run.sh                          # http://127.0.0.1:3099
+DEEPSEEK_API_KEY=sk-... .verify/run.sh  # 想验证真实余额
 ```
 
-插件通过 `plugin.patch.yml` 里的绝对路径挂载，不需要安装，改完代码重启即可。
+插件通过运行时生成的 `.verify/plugin.patch.yml`（绝对路径）挂载，不需要安装。
+不带密钥也能跑：插件会走「未配置凭证」分支，正好用来验证抱盆图。
 
-## 2. 用 dsh plugin add 安装后的 profile
+## 2. 验证「用户安装后的样子」
 
 ```sh
 export DSH_HOME=$PWD/.verify/dsh-home
@@ -37,46 +34,46 @@ dsh --profile vk1bundle --from-default-profile web --help
 dsh plugin --profile vk1bundle add ./dsh-vk1-pet -w
 dsh --profile vk1bundle --dump-config | grep -A2 'dsh-vk1-pet'
 
-.verify/run-installed.sh  # http://127.0.0.1:3098
+.verify/run-installed.sh                # http://127.0.0.1:3098
 ```
 
-## 3. 取 Cookie 后访问路由
+这一轮验证的是模块解析走 profile 自己的 `node_modules` 链接，而不是 `--patch` 的直连路径。
+
+## 3. 用 Cookie 访问插件路由
 
 `dsh web` 启动时会打印带 `?token=` 的地址；用它换一次 Cookie，之后就能像浏览器一样访问：
 
 ```sh
 TOKEN=<启动日志里的 token>
-curl -c cookies.txt "http://127.0.0.1:3098/?token=$TOKEN"
-curl -b cookies.txt "http://127.0.0.1:3098/dsh-vk1-pet/api/state"
-curl -b cookies.txt -X POST -d '{}' "http://127.0.0.1:3098/dsh-vk1-pet/api/refresh"
-curl -b cookies.txt -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:3098/dsh-vk1-pet/assets/sprite.png"
+curl -c cookies.txt "http://127.0.0.1:3099/?token=$TOKEN"
+curl -b cookies.txt "http://127.0.0.1:3099/dsh-vk1-pet/api/state"
+curl -b cookies.txt -X POST -d '{}' "http://127.0.0.1:3099/dsh-vk1-pet/api/refresh"
+curl -b cookies.txt -o /dev/null -w '%{http_code}\n' \
+     "http://127.0.0.1:3099/dsh-vk1-pet/assets/sprite.png"
 ```
 
-不带 Cookie 请求应当得到 `401`；带 Cookie 的 `assets/../package.json` 应当得到 `404`。
+应当看到：不带 Cookie 得到 `401`；带 Cookie 的 `assets/../package.json` 得到 `404`；
+`api/state` 返回 `{ ok: true, state: { … } }`。
 
-## 4. 未配置凭证的分支
-
-```sh
-DSH_HOME=$PWD/.verify/dsh-home dsh --profile vk1bundle --port 3097 --no-open
-```
-
-（不设置 `DEEPSEEK_API_KEY`）状态应为 `unconfigured`，浏览器据此显示抱盆图。
-
-## 5. 离屏预览图
+## 4. 离屏预览图
 
 用插件自己的几何常量渲染，不是另写一份：
 
 ```sh
+pip install --target .verify/pylibs pillow
+curl -sSL -o .verify/fonts/NotoSansSC-Bold.otf \
+  https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/SC/NotoSansSC-Bold.otf
+
 node .verify/preview-geometry.mjs > .verify/geometry.json
-PYTHONPATH=.verify/pylibs python3.12 .verify/render_preview.py
+PYTHONPATH=.verify/pylibs python3 .verify/render_preview.py
 ```
 
-产物在 `.verify/previews/`，其中 `contact-sheet.png` 是七个场景的横排总览，
-仓库的 `docs/previews/` 是它的副本。
+产物在 `.verify/previews/`，其中 `contact-sheet.png` 是七个场景的横排总览；
+仓库里的 `docs/previews/` 是它的副本。
 
 ## 目录里什么是生成的
 
-`dsh-home/`、`xdg-*/`、`pnpm-store/`、`pylibs/`、`fonts/`、`geometry.json`、
-`previews/`、`cookies*.txt`、`index*.html`、`bundle*.js` 都是生成的，删掉后按上面的
-步骤可以完全重建；只有 `run.sh`、`run-installed.sh`、`plugin.patch.yml`、
-`preview-geometry.mjs`、`render_preview.py` 是源文件。
+`.verify/plugin.patch.yml`、`dsh-home/`、`xdg-*/`、`pnpm-store/`、`pylibs/`、
+`fonts/`、`geometry.json`、`previews/`、`cookies*.txt` 都是生成的，删掉后按上面
+步骤可以完全重建。源文件只有 `run.sh`、`run-installed.sh`、`preview-geometry.mjs`、
+`render_preview.py` 和这份说明。

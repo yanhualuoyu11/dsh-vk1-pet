@@ -62,7 +62,7 @@ fi
 git rev-parse --verify -q HEAD >/dev/null || die "没有任何提交，无法推送。"
 
 # ── 3. github.com 可达吗 ──────────────────────────────────────────────────────
-# git push 走 github.com 的 smart HTTP；DNS 可能给出一个本机连不上的地址，
+# git push 走 github.com 的 smart HTTP；DNS 可能给出一个当前网络连不上的地址，
 # 表现为「敲了命令没反应」。先探测，免得用户对着一个静默挂起的进程干等。
 git_host_reachable() {
   timeout 8 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null

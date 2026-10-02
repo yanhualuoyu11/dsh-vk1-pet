@@ -13,6 +13,7 @@ node_modules/
 .verify/fonts/
 .verify/previews/
 .verify/geometry.json
+.verify/plugin.patch.yml
 .verify/cookies*.txt
 .verify/index*.html
 .verify/*.js.tmp

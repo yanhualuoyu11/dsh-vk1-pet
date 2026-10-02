@@ -1,23 +1,29 @@
 #!/bin/sh
-# Verification launcher #2: boot the profile where the plugin is installed the
-# way a user installs it (`dsh plugin --profile vk1bundle add …`), so module
-# resolution goes through the profile's own node_modules symlink.
+# 第二种验证：插件是**按用户的方式装进 profile** 的
+# （`dsh plugin --profile vk1bundle add ./dsh-vk1-pet -w`），
+# 所以模块解析走 profile 自己的 node_modules 链接，而不是 --patch 的直接路径。
+#
+#   .verify/run-installed.sh                 # http://127.0.0.1:3098
+#   DEEPSEEK_API_KEY=sk-... .verify/run-installed.sh
+#
+# 首次使用前先建好 profile（见 .verify/README.md），脚本会在缺 profile 时提示。
 set -eu
-export PATH=/root/.nvm/versions/node/v22.22.2/bin:$PATH
-V=/root/projs/ds_VK-1_plugin/.verify
-export DSH_HOME=$V/dsh-home
-export XDG_DATA_HOME=$V/xdg-data XDG_CACHE_HOME=$V/xdg-cache XDG_CONFIG_HOME=$V/xdg-config
-export npm_config_store_dir=$V/pnpm-store
-export DEEPSEEK_API_KEY="$(python3 - <<'PY'
-import re
-try:
-    txt = open('/root/.dsh/.credentials.yaml', encoding='utf-8').read()
-except OSError:
-    print('')
-    raise SystemExit
-m = re.search(r'^\s*DEEPSEEK_API_KEY:\s*(\S+)\s*$', txt, re.M)
-print(m.group(1).strip().strip('"\'') if m else '')
-PY
-)"
-cd /root/projs/ds_VK-1_plugin
-exec dsh --profile vk1bundle --port "${VK1_PORT:-3098}" --no-open
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VERIFY="$ROOT/.verify"
+PROFILE="${VK1_PROFILE:-vk1bundle}"
+
+# 刻意不读继承来的 DSH_HOME，理由见 run.sh。要换目录请用 VK1_DSH_HOME。
+export DSH_HOME="${VK1_DSH_HOME:-$VERIFY/dsh-home}"
+export XDG_DATA_HOME="$VERIFY/xdg-data" XDG_CACHE_HOME="$VERIFY/xdg-cache" XDG_CONFIG_HOME="$VERIFY/xdg-config"
+export npm_config_store_dir="$VERIFY/pnpm-store"
+
+if [ ! -f "$DSH_HOME/profiles/$PROFILE/package.json" ]; then
+  echo "还没有 profile '$PROFILE'。先运行：" >&2
+  echo "  DSH_HOME=$DSH_HOME dsh --profile $PROFILE --from-default-profile web --help" >&2
+  echo "  DSH_HOME=$DSH_HOME dsh plugin --profile $PROFILE add ./dsh-vk1-pet -w" >&2
+  exit 1
+fi
+
+cd "$ROOT"
+exec dsh --profile "$PROFILE" --port "${VK1_PORT:-3098}" --no-open
