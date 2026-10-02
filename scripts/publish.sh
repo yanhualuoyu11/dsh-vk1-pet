@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 #
-# 创建 GitHub 仓库并推送这个项目。
+# 提交并推送这个项目到 GitHub。
 #
 #   scripts/publish.sh                    # 用 gh CLI 的登录态
 #   GITHUB_TOKEN=ghp_xxx scripts/publish.sh
 #   scripts/publish.sh my-repo-name       # 换个仓库名（默认 dsh-vk1-pet）
 #
 # 令牌只从环境变量或 gh CLI 读，不会写进仓库、不会写进 git config。
-# 一切就绪后脚本只做三件事：commit（如果还没提交）、建仓库（如果还不存在）、push。
+#
+# 注意：有些环境里 github.com:443（git push 走的 smart HTTP）不通，但
+# api.github.com 正常。脚本会先探测，遇到这种情况自动改用
+# scripts/publish-api.mjs 走 REST API 上传同一个提交。
 set -euo pipefail
 
 REPO_NAME="${1:-dsh-vk1-pet}"
@@ -15,6 +18,7 @@ BRANCH="main"
 REPO_DESCRIPTION="DSH 余额桌宠：把 VK-1 做成 DeepSeek Harness 的 web 插件"
 
 cd "$(dirname "$0")/.."
+ROOT="$(pwd)"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -32,10 +36,10 @@ fi
 if ! git rev-parse --verify -q HEAD >/dev/null; then
   say "创建首次提交……"
   git add -A
-  git commit -q -m "$(cat <<'MSG'
+  git commit -q -F - <<'MSG'
 DSH 余额桌宠：把 VK-1 做成 DSH web 插件
 
-宿主半边用 DSH 自己的凭证服务与账号服务读余额并通过 /dsh-vk1-pet/api/*
+宿主半边用 DSH 自己的凭证服务与账号服务读余额，并通过 /dsh-vk1-pet/api/*
 暴露只读投影；浏览器半边注册进 shell.overlay，在网页界面上渲染悬浮桌宠
 （四个角色、拖拽吸附、扣费红闪/震动/原版音效、充值绿环、离线抱盆图、
 平板余额、逐像素鼠标穿透）。
@@ -45,26 +49,60 @@ DSH 余额桌宠：把 VK-1 做成 DSH web 插件
 - assets/ 五张角色 PNG 与 hit.mp3，逐字节复制自上游并记录 SHA-256
 - test/   62 个用例，含 jsdom 真实 DOM 渲染层
 MSG
-)"
 else
+  # Refuse rather than commit on the user's behalf: an auto-commit authors their
+  # work under a placeholder message they never chose.
   if [ -n "$(git status --porcelain)" ]; then
-    say "工作区有未提交的改动，先提交它们……"
-    git add -A
-    git commit -q -m "更新"
+    git status --short
+    die "工作区有未提交的改动。先自己提交（提交信息由你写），再跑本脚本：
+    git add -A && git commit -m \"...\""
   fi
 fi
 [ -z "$(git status --porcelain)" ] || die "工作区仍不干净，请先处理：git status"
 git rev-parse --verify -q HEAD >/dev/null || die "没有任何提交，无法推送。"
 
-# ── 3. 确认远端 ───────────────────────────────────────────────────────────────
+# ── 3. github.com 可达吗 ──────────────────────────────────────────────────────
+# git push 走 github.com 的 smart HTTP；DNS 可能给出一个本机连不上的地址，
+# 表现为「敲了命令没反应」。先探测，免得用户对着一个静默挂起的进程干等。
+git_host_reachable() {
+  timeout 8 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null
+}
+
+if ! git_host_reachable; then
+  say "github.com:443 连不上（git push 会静默挂起），改用 api.github.com 上传。"
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    exec node "$ROOT/scripts/publish-api.mjs" --repo "$REPO_NAME" --branch "$BRANCH"
+  fi
+  cat <<EOF
+
+api.github.com 是通的，但需要令牌：
+
+    GITHUB_TOKEN=<fine-grained PAT> scripts/publish.sh
+
+PAT 需要 Contents: read/write；要顺带新建仓库还需要 Administration: write。
+另一条路：把整个目录拷到能正常访问 GitHub 的机器上，在那里 git push。
+EOF
+  exit 1
+fi
+
+# ── 4. 推送到已有 origin ──────────────────────────────────────────────────────
+# 有令牌时用内联 credential helper：令牌只存在于环境变量里，不落盘、不进 argv。
+push_origin() {
+  local extra=()
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    extra+=(-c "credential.helper=!f() { printf 'username=%s\\npassword=%s\\n' x-access-token \"\$GITHUB_TOKEN\"; }; f")
+  fi
+  GIT_TERMINAL_PROMPT=0 git "${extra[@]}" push -u origin "$BRANCH"
+}
+
 if git remote get-url origin >/dev/null 2>&1; then
   say "已存在 origin：$(git remote get-url origin)"
-  git push -u origin "$BRANCH"
+  push_origin || die "推送失败。没有凭证就设 GITHUB_TOKEN，或换一台能正常访问 GitHub 的机器。"
   say "完成。"
   exit 0
 fi
 
-# ── 4. 建仓库 ─────────────────────────────────────────────────────────────────
+# ── 5. 建仓库并推送 ───────────────────────────────────────────────────────────
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   api() { curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
                  -H "Accept: application/vnd.github+json" \
@@ -83,10 +121,7 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
   fi
 
   git remote add origin "https://github.com/${LOGIN}/${REPO_NAME}.git"
-  # 令牌只在这一条命令的环境里出现，不落到 .git/config。
-  git -c "http.https://github.com/.extraheader=Authorization: Bearer ${GITHUB_TOKEN}" \
-      push -u origin "$BRANCH"
-  git remote set-url origin "https://github.com/${LOGIN}/${REPO_NAME}.git"
+  push_origin || die "推送失败。"
   say "完成：https://github.com/${LOGIN}/${REPO_NAME}"
 elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   say "用 gh CLI 创建仓库并推送……"
@@ -95,7 +130,7 @@ elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   say "完成。"
 else
   cat <<EOF
-没有可用的 GitHub 凭证。二选一：
+没有可用的 GitHub 凭证。三选一：
 
 A. 安装并登录 gh CLI，然后重跑本脚本：
      gh auth login
@@ -103,10 +138,10 @@ A. 安装并登录 gh CLI，然后重跑本脚本：
 
 B. 在网页上建空仓库（不要勾选 README / .gitignore / license），然后：
      git remote add origin https://github.com/<你的用户名>/${REPO_NAME}.git
-     git push -u origin ${BRANCH}
+     scripts/publish.sh
 
-C. 用令牌跑：
-     GITHUB_TOKEN=<fine-grained PAT，需 Contents: read/write 与 Administration: write> scripts/publish.sh
+C. 用令牌跑（可顺带建仓库）：
+     GITHUB_TOKEN=<fine-grained PAT> scripts/publish.sh
 EOF
   exit 1
 fi

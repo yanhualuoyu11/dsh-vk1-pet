@@ -59,29 +59,61 @@ dsh web            # 重启后生效
 
 ## 上传到 GitHub
 
-本地仓库已经 `git init -b main` 并暂存好全部 49 个文件（约 12.7 MB），没有提交——
-作者留给你自己的 `git config`。
+仓库已经 `git init -b main` 并提交好（2 个提交，50 个文件约 12.1 MB）。
+**作者用的是你自己的 git 配置**，脚本不会写 `--author`。
+
+### 先看一个坑
+
+这台机器上 `git push` 可能**敲下去毫无反应**，原因是网络而不是提交：
+
+| 主机 | 结果 |
+| --- | --- |
+| `api.github.com` | 每次都是秒回 `200` |
+| `codeload.github.com` / `raw.githubusercontent.com` | 正常 |
+| **`github.com`（git push 走的 smart HTTP）** | **时通时断**：DNS 给出 `20.205.243.166`，TCP 443 经常连不上；即使换成 `140.82.112.3` 也有 3/5 超时 |
+
+`git push` 卡在 `Trying <ip>:443...` 时**不会有任何输出**，看起来就像"没反应"。
+另外这台机器上没有 `gh` CLI、没有 SSH 私钥、也没有 credential helper，所以即使网络通了，
+git 也会停下来等你输入用户名和密码（GitHub 早已不支持账号密码，必须用 PAT）。
+
+### 正常情况：一条命令
 
 ```sh
-# 1. 一次性设置提交身份（如果还没设过）
-git config --global user.name  "你的名字"
-git config --global user.email "你的邮箱"
+# 用 gh CLI（需要先 gh auth login）
+scripts/publish.sh
 
-# 2. 建仓库 + 提交 + 推送
-scripts/publish.sh                        # 用 gh CLI 的登录态
-GITHUB_TOKEN=ghp_xxx scripts/publish.sh   # 或用 fine-grained PAT
-                                          # （Contents: read/write + Administration: write）
+# 或者用 fine-grained PAT
+GITHUB_TOKEN=ghp_xxx scripts/publish.sh
 ```
 
-不想给任何令牌，就自己建好空仓库再推：
+脚本会先探测 `github.com:443`：
+
+- **通** → 常规 `git push`，并在有令牌时用内联 credential helper
+  （令牌只存在于环境变量，不落盘、不进 argv）。
+- **不通** → 自动改用下面这条 API 通道。
+
+### 备用通道：走 `api.github.com`
+
+`scripts/publish-api.mjs` 用 REST 的 Git Data API 上传**同一个提交**
+（`git ls-tree HEAD` 的内容，不会带上未提交或被忽略的东西）：
 
 ```sh
-git commit -m "DSH 余额桌宠：把 VK-1 做成 DSH web 插件"
+GITHUB_TOKEN=ghp_xxx node scripts/publish-api.mjs
+node scripts/publish-api.mjs --dry-run      # 只看会上传什么，不发请求
+```
+
+PAT 需要 `Contents: read/write`；要顺带新建仓库还需要 `Administration: write`。
+实测：用假令牌跑，`api.github.com` 在 **1 秒内**返回 `401 Bad credentials`——
+说明这条通道是稳定的，慢/挂起的只有 `github.com`。
+
+### 最省事的一条路
+
+把整个目录拷到能正常访问 GitHub 的机器上，在那里 `git push`：
+
+```sh
 git remote add origin https://github.com/<你的用户名>/dsh-vk1-pet.git
 git push -u origin main
 ```
-
-脚本不会把令牌写进 `.git/config`，也不会替你写 `--author`；提交作者永远来自你的 git 配置。
 
 ## 设计要点
 
