@@ -1,17 +1,12 @@
 # VK-1 → DSH 插件
 
+~~Deepseek大制作~~
+
 把 [VKmich16/VK-1](https://github.com/VKmich16/VK-1)（「DSH 余额桌宠」，原本是独立的
 macOS Swift 应用 / Windows PowerShell 脚本）改造成 **DeepSeek Harness 的 web 插件**。
 
-原版要自己读凭证文件、自己开一个无边框窗口、自己轮询余额。作为插件，这些职责回到 DSH 本身：
-宿主半边用 DSH 自己的凭证服务与账号服务拿余额，浏览器半边只负责把那只鱼画在网页界面上。
-结果是**一个 npm 包、零独立进程、跨平台**。
-
 ![桌宠总览](docs/previews/contact-sheet.png)
 
-> 上图由 `.verify/render_preview.py` 用插件自己的几何常量离屏合成，展示的是角色画布本身
-> （不含菜单弹层与余额胶囊）。单张图见 `docs/previews/`：`connected-medium`、`hit-medium`、
-> `topup-medium`、`offline-medium`、`gemini-large`、`gpt-huge`、`claude-small`。
 
 ## 成果
 
@@ -36,8 +31,6 @@ dsh web            # 重启后生效
 
 卸载：`dsh plugin --profile web remove dsh-vk1-pet`。
 
-> 没有自动替你安装，也没有重启你正在使用的 `dsh web`：安装动作会改动 `web` profile，
-> 重启会中断当前页面会话，这两件事留给你决定。
 
 ## 目录
 
@@ -56,146 +49,6 @@ dsh web            # 重启后生效
 
 `repo/` 只是移植时用来比对素材的第三方 checkout（上游未附许可证），已写进 `.gitignore`。
 插件真正分发的 5 张图与 `hit.mp3` 都在 `dsh-vk1-pet/assets/`，并逐文件记录了 SHA-256。
-
-## 上传到 GitHub
-
-仓库已经 `git init -b main` 并提交好（2 个提交，50 个文件约 12.1 MB）。
-**作者用的是你自己的 git 配置**，脚本不会写 `--author`。
-
-### 先看一个坑
-
-这台机器上 `git push` 可能**敲下去毫无反应**，原因是网络而不是提交：
-
-| 主机 | 结果 |
-| --- | --- |
-| `api.github.com` | 每次都是秒回 `200` |
-| `codeload.github.com` / `raw.githubusercontent.com` | 正常 |
-| **`github.com`（git push 走的 smart HTTP）** | **时通时断**：DNS 给出 `20.205.243.166`，TCP 443 经常连不上；即使换成 `140.82.112.3` 也有 3/5 超时 |
-
-`git push` 卡在 `Trying <ip>:443...` 时**不会有任何输出**，看起来就像"没反应"。
-另外这台机器上没有 `gh` CLI、没有 SSH 私钥、也没有 credential helper，所以即使网络通了，
-git 也会停下来等你输入用户名和密码（GitHub 早已不支持账号密码，必须用 PAT）。
-
-### 正常情况：一条命令
-
-```sh
-# 用 gh CLI（需要先 gh auth login）
-scripts/publish.sh
-
-# 或者用 fine-grained PAT
-GITHUB_TOKEN=ghp_xxx scripts/publish.sh
-```
-
-脚本会先探测 `github.com:443`：
-
-- **通** → 常规 `git push`，并在有令牌时用内联 credential helper
-  （令牌只存在于环境变量，不落盘、不进 argv）。
-- **不通** → 自动改用下面这条 API 通道。
-
-### 备用通道：走 `api.github.com`
-
-`scripts/publish-api.mjs` 用 REST 的 Git Data API 上传**同一个提交**
-（`git ls-tree HEAD` 的内容，不会带上未提交或被忽略的东西）：
-
-```sh
-GITHUB_TOKEN=ghp_xxx node scripts/publish-api.mjs
-node scripts/publish-api.mjs --dry-run      # 只看会上传什么，不发请求
-```
-
-PAT 需要 `Contents: read/write`；要顺带新建仓库还需要 `Administration: write`。
-实测：用假令牌跑，`api.github.com` 在 **1 秒内**返回 `401 Bad credentials`——
-说明这条通道是稳定的，慢/挂起的只有 `github.com`。
-
-### 最省事的一条路
-
-把整个目录拷到能正常访问 GitHub 的机器上，在那里 `git push`：
-
-```sh
-git remote add origin https://github.com/<你的用户名>/dsh-vk1-pet.git
-git push -u origin main
-```
-
-## 设计要点
-
-**为什么是网页桌宠，而不是一个工具插件。** VK-1 的全部价值在那只鱼：倾斜平板上滚动的余额、
-掉钱时的一下红闪和震动。这些东西只有在界面上才有意义，所以插件形态选的是
-`shell.overlay`——ui-layout 声明的「全框悬浮层」，它默认鼠标穿透，正是桌宠需要的位置。
-
-**透明区域真的穿透。** 悬浮层默认穿透，但一个 1.4:1 的矩形命中区会挡住底下的输入框。
-插件把每张角色图降采样成一张 alpha 掩码，指针移动时逐像素判定，只有压到不透明像素
-才把 `pointer-events` 切成 `auto`。所以鱼的四周、尾巴的空隙都可以直接点到底下的界面。
-
-**凭证不出宿主。** 浏览器只拿到一个只读投影（余额、状态、错误、来源标签）。
-API Key 与平台令牌都留在 Node 进程里；每个 HTTP 路由先过
-`ctx.connection.requestRejection()`，也就是 `/api` 用的同一套 Cookie 与 Host/Origin 栅栏。
-
-**金额不用浮点。** 余额从十进制字符串精确解析到「分」，整数运算，最后一步按原版的
-四舍五入规则定分。少一分钱就会触发一次震动和音效，浮点误差会被当成真实扣费。
-
-**几何是移植的，不是估的。** 原版在 1536×1024 的原图上量了每块平板的三个角点。插件沿用
-同一组数值，把它解成一个 CSS `matrix(...)`；测试逐点断言变换后的角点与测量值吻合，
-`.verify/render_preview.py` 再用同一组矩阵离屏渲染出上面那张预览图。
-
-## 验证
-
-### 自动化用例（62 个）
-
-```sh
-cd dsh-vk1-pet && npm install && npm test
-```
-
-覆盖：十进制→分与舍入、`Retry-After`（秒数与 HTTP 日期）、钱包求和与货币校验、
-`/user/balance` 各状态分支（含 401 / 429 / 重定向拒绝 / 超时 / 超大响应）、
-动画状态机（0.2 秒步进、重复轮询不重放、大跳变直接对齐、演示不影响真实余额、
-休眠不产生音效爆发）、平板仿射几何、主题令牌配对，以及两个渲染层级：
-
-- **字符串渲染**：构建产物能否通过 `window.__ModuleLoader__` 注册，`apply` 是否只占一个
-  `shell.overlay` 席位，四个角色能否无异常渲染。
-- **真实 DOM（jsdom）**：把同一个构建产物挂进 DOM，用打桩的 `fetch` 依次喂
-  「连接中 → 已连接 → 连接失败 → 未配置」四种宿主状态，断言抱盆图与平板相互切换、
-  三个客串角色不受影响；再真的点开菜单触发一次扣费，检查金额飘字是否按状态显示。
-
-### 端到端启动验证
-
-`dsh web` 被完整启动了两次，用的都是工作区内的独立 `DSH_HOME`，**没有触碰 `~/.dsh`**：
-
-```sh
-.verify/run.sh            # 用 --patch 绝对路径挂载插件，端口 3099
-.verify/run-installed.sh  # 用 dsh plugin add 安装后的 profile，端口 3098
-```
-
-验证内容与实际结果：
-
-| 检查 | 结果 |
-| --- | --- |
-| 插件进入 `window.__DSH_BOOT__` 客户端图 | `{"id":"dsh-vk1-pet","url":"/plugins/??dsh-vk1-pet/client.js&rev=…"}` |
-| `/dsh-vk1-pet/api/state` | `200`，`status: ready`，`fen: 3070`，`display: "30.70"`，`source: "API Key"` |
-| 与 `api.deepseek.com/user/balance` 直连对比 | 完全一致（`total_balance: "31.00"` 时刻读到的就是 `3100` 分） |
-| 5 张角色图 + `hit.mp3` | `200`，`image/png` / `audio/mpeg`，字节数与源文件一致 |
-| 路径穿越 `assets/../package.json` | `404` |
-| 无 Cookie 访问 api / assets | `401`（走 DSH 自己的浏览器鉴权） |
-| `POST /api/refresh` | `200`，revision 递增 |
-| `POST /api/settings`（合法 / 非法间隔、非法来源） | `200` / `400` / `400`，并落盘 `$DSH_HOME/dsh-vk1-pet/config.json` |
-| `GET` 打到 POST 路由 | `405` |
-| `dsh plugin --profile vk1bundle add ./dsh-vk1-pet` | 自动写入 `dsh.profile.bundles`，`--dump-config` 出现 `# == dsh-vk1-pet` 层 |
-
-本环境没有可用的浏览器/显示器（也无 headless Chromium），所以**没有做真实像素截图**：
-界面部分用「构建产物在 React 下真实渲染 + 离屏按同一组矩阵合成预览图」来验证，
-实际观感请你在自己的浏览器里确认。
-
-重新生成预览图：
-
-```sh
-node .verify/preview-geometry.mjs > .verify/geometry.json
-PYTHONPATH=.verify/pylibs python3.12 .verify/render_preview.py
-```
-
-### 还没验证的
-
-- Windows / Linux 上 `dsh web` 的实际观感（本机只有 Linux，且无浏览器）。
-- DSH 平台账号模式（`ctx.deepseekAccount`）的实机余额：本机只有 API Key 凭证，
-  账号分支只做了代码路径与类型层面的对齐，没有真实登录态可测。
-- 长时间运行下的 429 退避与多标签页轮询压力。
 
 ## 来源与许可
 
